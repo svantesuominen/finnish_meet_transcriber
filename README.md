@@ -54,7 +54,7 @@ A Python tool for automatically transcribing Finnish Google Meet recordings (and
    - Move the original media file to `processed/`.
 
 ## Improving Accuracy (Important!)
-If the results contain nonsense words or poor transcription (e.g. for elderly speakers or phone audio), **use a larger model**.
+If the results contain nonsense words or poor transcription, **use a larger model**.
 The default is `base` (fast but less accurate).
 
 **Recommended Command for Quality:**
