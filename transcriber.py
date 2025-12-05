@@ -47,7 +47,7 @@ def extract_audio(video_path):
         
         print(f"Extracting audio from {video_path}...")
         
-        # Use ffmpeg to extract audio
+        # Use ffmpeg to extract audio (mono mix)
         (
             ffmpeg
             .input(video_path)
@@ -62,6 +62,47 @@ def extract_audio(video_path):
     except Exception as e:
         print(f"An error occurred: {e}", file=sys.stderr)
         return None
+
+def extract_stereo_channels(video_path):
+    """
+    Extracts Left and Right audio channels into separate WAV files.
+    """
+    try:
+        left_temp = tempfile.NamedTemporaryFile(suffix="_left.wav", delete=False)
+        right_temp = tempfile.NamedTemporaryFile(suffix="_right.wav", delete=False)
+        left_temp.close()
+        right_temp.close()
+        
+        print(f"Extracting stereo channels from {video_path}...")
+        
+        # Extract Left
+        (
+            ffmpeg
+            .input(video_path)
+            .filter('channelsplit', channel_layout='stereo', channels='FL')
+            .output(left_temp.name, acodec='pcm_s16le', ar='16k')
+            .overwrite_output()
+            .run(quiet=True)
+        )
+        
+        # Extract Right
+        (
+            ffmpeg
+            .input(video_path)
+            .filter('channelsplit', channel_layout='stereo', channels='FR')
+            .output(right_temp.name, acodec='pcm_s16le', ar='16k')
+            .overwrite_output()
+            .run(quiet=True)
+        )
+        
+        return left_temp.name, right_temp.name
+        
+    except ffmpeg.Error as e:
+        print(f"Error extracting stereo channels: {e.stderr.decode()}", file=sys.stderr)
+        return None, None
+    except Exception as e:
+        print(f"An error occurred during stereo extraction: {e}", file=sys.stderr)
+        return None, None
 
 def transcribe_audio(audio_path, model_name="base", language="fi"):
     """
@@ -79,25 +120,57 @@ def transcribe_audio(audio_path, model_name="base", language="fi"):
         print(f"Error during transcription: {e}", file=sys.stderr)
         return None
 
+def diarize_audio(audio_path, hf_token):
+    """
+    Performs speaker diarization using pyannote.audio.
+    Returns a list of segments: [(start, end, speaker), ...]
+    """
+    try:
+        from pyannote.audio import Pipeline
+    except ImportError:
+        print("Error: pyannote.audio is not installed. Please install it to use diarization.", file=sys.stderr)
+        return None
+
+    try:
+        print("Loading Diarization pipeline (this downloads the model from Hugging Face)...")
+        pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=hf_token)
+        
+        # If model failed to load (e.g. bad token), it might return None
+        if pipeline is None:
+             print("Error: Failed to load pipeline. Check your HF_TOKEN and if you accepted the model terms.", file=sys.stderr)
+             return None
+
+        # Move to GPU if available (requires torch)
+        # import torch
+        # if torch.cuda.is_available():
+        #     pipeline.to(torch.device("cuda"))
+
+        print("Diarizing audio...")
+        diarization = pipeline(audio_path)
+        
+        segments = []
+        for turn, _, speaker in diarization.itertracks(yield_label=True):
+            # start, end, speaker
+            segments.append((turn.start, turn.end, speaker))
+            
+        return segments
+    except Exception as e:
+        print(f"Error during diarization: {e}", file=sys.stderr)
+        return None
+
 def main():
     parser = argparse.ArgumentParser(description="Transcribe Finnish Google Meet recordings.")
     parser.add_argument("input_file", nargs='?', help="Path to a specific video file. If not provided, scans the 'input' directory.")
     parser.add_argument("--model", default="base", choices=["tiny", "base", "small", "medium", "large"], help="Whisper model size")
-    # Removed --output_dir argument as we now enforce the structure, but could keep it as an override if needed. 
-    # For now, let's keep it simple and stick to the requested structure, but respecting if user wants to override default.
     parser.add_argument("--output_dir", default=OUTPUT_DIR, help=f"Directory to save the text file (default: {OUTPUT_DIR})")
+    parser.add_argument("--stereo", action="store_true", help="Process Left and Right channels separately (useful for split-channel recordings)")
+    parser.add_argument("--diarize", action="store_true", help="Enable speaker diarization (Requires pyannote.audio and HF_TOKEN env var)")
     
     args = parser.parse_args()
     
     setup_directories()
     
     files_to_process = []
-    
-    # Logic: 
-    # 1. If input_file arg is provided -> Process that specific file (in place or wherever it is). 
-    #    NOTE: The user request implies searching in ./input. If a specific file is given, we should probably just process it.
-    #    However, the request specifically asked "make it so that it searches for the videos in ./input folder".
-    #    So default behavior updates to search ./input.
     
     if args.input_file:
         if not os.path.exists(args.input_file):
@@ -125,18 +198,94 @@ def main():
     for media_file_path in files_to_process:
         print(f"\nProcessing: {media_file_path}")
         
-        # Extract audio
-        temp_audio_path = extract_audio(media_file_path)
-        if not temp_audio_path:
-            print(f"Skipping {media_file_path} due to audio extraction failure.")
-            continue
+        transcript = ""
+        cleanup_files = []
+
+        if args.stereo:
+            # Stereo processing
+            left_path, right_path = extract_stereo_channels(media_file_path)
+            if left_path and right_path:
+                cleanup_files.extend([left_path, right_path])
+                
+                print("Transcribing Left Channel...")
+                left_text = transcribe_audio(left_path, model_name=args.model, language="fi")
+                
+                print("Transcribing Right Channel...")
+                right_text = transcribe_audio(right_path, model_name=args.model, language="fi")
+                
+                if left_text or right_text:
+                    transcript = f"--- [LEFT CHANNEL] ---\n{left_text}\n\n--- [RIGHT CHANNEL] ---\n{right_text}"
+            else:
+                 print(f"Skipping {media_file_path} due to stereo extraction failure.")
+                 continue
+
+        else:
+            # Standard Mono processing
+            temp_audio_path = extract_audio(media_file_path)
+            if not temp_audio_path:
+                print(f"Skipping {media_file_path} due to audio extraction failure.")
+                continue
+            cleanup_files.append(temp_audio_path)
             
-        # Transcribe
-        transcript = transcribe_audio(temp_audio_path, model_name=args.model, language="fi")
+            # Diarization Logic
+            if args.diarize:
+                hf_token = os.environ.get("HF_TOKEN")
+                if not hf_token:
+                    print("Error: HF_TOKEN environment variable not set. Cannot perform diarization.", file=sys.stderr)
+                    transcript = transcribe_audio(temp_audio_path, model_name=args.model, language="fi") # Fallback
+                else:
+                    # 1. Transcribe to get segments (we need word-level or segment-level timestamps, 
+                    #    but standard transcribe returns a big string. We need verbose output.)
+                    print(f"Loading Whisper model '{args.model}'...")
+                    model = whisper.load_model(args.model)
+                    print(f"Transcribing (Language: fi)...")
+                    # We need the result object to match timestamps
+                    result = model.transcribe(temp_audio_path, language="fi")
+                    
+                    # 2. Diarize
+                    speakers = diarize_audio(temp_audio_path, hf_token)
+                    
+                    if speakers and result:
+                        # Simple alignment strategy:
+                        # Iterate through whisper segments, find which speaker was active during that time.
+                        # This is naive but often sufficient.
+                        
+                        final_transcript = []
+                        for segment in result['segments']:
+                            start = segment['start']
+                            end = segment['end']
+                            text = segment['text']
+                            
+                            # Find dominant speaker in this window
+                            # Calculate overlap with each speaker
+                            speaker_overlaps = {}
+                            for sp_start, sp_end, sp_label in speakers:
+                                # Overlap calc
+                                overlap_start = max(start, sp_start)
+                                overlap_end = min(end, sp_end)
+                                overlap_dur = max(0, overlap_end - overlap_start)
+                                if overlap_dur > 0:
+                                    speaker_overlaps[sp_label] = speaker_overlaps.get(sp_label, 0) + overlap_dur
+                            
+                            best_speaker = "UNKNOWN"
+                            if speaker_overlaps:
+                                best_speaker = max(speaker_overlaps, key=speaker_overlaps.get)
+                            
+                            final_transcript.append(f"[{best_speaker}] {text}")
+                            
+                        transcript = "\n".join(final_transcript)
+                    else:
+                        print("Diarization failed or no speakers found, falling back to simple transcript.")
+                        transcript = result["text"]
+
+            else:
+                # Transcribe
+                transcript = transcribe_audio(temp_audio_path, model_name=args.model, language="fi")
         
-        # Cleanup temp file
-        if os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
+        # Cleanup temp files
+        for temp_file in cleanup_files:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
             
         if transcript:
             # Construct output filename

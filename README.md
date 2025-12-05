@@ -26,8 +26,25 @@ A Python tool for automatically transcribing Finnish Google Meet recordings (and
 
 3. **Run**:
    Place your video or audio files in the `input/` directory and run:
+
+   **Standard Transcription:**
    ```bash
    python transcriber.py
+   ```
+
+   **Stereo Mode (Left/Right Channel Split):**
+   Useful if you have recorded speakers on separate channels.
+   ```bash
+   python transcriber.py --stereo
+   ```
+
+   **Speaker Diarization (AI Speaker Detection):**
+   Requires `pyannote.audio` and a Hugging Face Token.
+   1. Install pyannote: `pip install pyannote.audio` (and `torch` with CUDA if you have a GPU)
+   2. Set your token: `export HF_TOKEN="your_token_here"`
+   3. Run:
+   ```bash
+   python transcriber.py --diarize
    ```
 
    The script will:
