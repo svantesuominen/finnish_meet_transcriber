@@ -53,6 +53,27 @@ A Python tool for automatically transcribing Finnish Google Meet recordings (and
    - Save the transcript to `output/<filename>.txt`.
    - Move the original media file to `processed/`.
 
+## Improving Accuracy (Important!)
+If the results contain nonsense words or poor transcription (e.g. for elderly speakers or phone audio), **use a larger model**.
+The default is `base` (fast but less accurate).
+
+**Recommended Command for Quality:**
+```bash
+python transcriber.py --model medium
+```
+or for the absolute best results (runs slower):
+```bash
+python transcriber.py --model large
+```
+
+## Output Format
+- **Standard**: Continuous text block.
+- **Diarization (`--diarize`)**: Readable dialogue format:
+  ```text
+  Person 1: "Hello."
+  Person 2: "Hi there."
+  ```
+
 ## Credits
 
 This project was co-created by **Svante Suominen** and **Antigravity** (Google DeepMind).

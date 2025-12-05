@@ -239,11 +239,13 @@ def main():
         duration = get_audio_duration(media_file_path)
         if duration > 0:
             print(f"Audio Duration: {format_duration(duration)}")
-            # Rough estimation: 
-            # Tiny/Base ~ 10-20% of duration on CPU
-            # Large ~ 50-100% of duration on CPU
-            # GPU is much faster.
-            print("Estimated time: This depends heavily on your hardware.")
+            print("\n[TIP] Performance vs Quality:")
+            print(" - Current Model: " + args.model)
+            if args.model in ['tiny', 'base', 'small']:
+                print(" - For better accuracy (especially with elderly/muffled speech), use: --model medium")
+            print(" - Large models take longer but produce the best results.")
+            
+            print("\nEstimated time: This depends heavily on your hardware.")
             print(" - Fast CPU/GPU: ~10-20% of audio length")
             print(" - Slower CPU:   ~50-100% of audio length")
         
@@ -310,32 +312,46 @@ def main():
                         print("Aligning speakers with transcript...")
                         # Simple alignment strategy:
                         # Iterate through whisper segments, find which speaker was active during that time.
-                        # This is naive but often sufficient.
                         
                         final_transcript = []
+                        current_speaker = None
+                        
+                        # Map raw speaker labels (SPEAKER_00) to friendly names (Person 1)
+                        # We'll just sort them to ensure consistent numbering
+                        unique_speakers = sorted(list(set(s[2] for s in speakers)))
+                        speaker_map = {label: f"Person {i+1}" for i, label in enumerate(unique_speakers)}
+                        
                         for segment in result['segments']:
                             start = segment['start']
                             end = segment['end']
-                            text = segment['text']
+                            text = segment['text'].strip()
                             
                             # Find dominant speaker in this window
-                            # Calculate overlap with each speaker
                             speaker_overlaps = {}
                             for sp_start, sp_end, sp_label in speakers:
-                                # Overlap calc
                                 overlap_start = max(start, sp_start)
                                 overlap_end = min(end, sp_end)
                                 overlap_dur = max(0, overlap_end - overlap_start)
                                 if overlap_dur > 0:
                                     speaker_overlaps[sp_label] = speaker_overlaps.get(sp_label, 0) + overlap_dur
                             
-                            best_speaker = "UNKNOWN"
+                            best_speaker_label = "UNKNOWN"
                             if speaker_overlaps:
-                                best_speaker = max(speaker_overlaps, key=speaker_overlaps.get)
+                                best_speaker_label = max(speaker_overlaps, key=speaker_overlaps.get)
                             
-                            final_transcript.append(f"[{best_speaker}] {text}")
+                            friendly_name = speaker_map.get(best_speaker_label, "Unknown Speaker")
                             
-                        transcript = "\n".join(final_transcript)
+                            # Validates if we should start a new line or append to previous
+                            if friendly_name != current_speaker:
+                                # New speaker block
+                                final_transcript.append(f"\n{friendly_name}: \"{text}\"")
+                                current_speaker = friendly_name
+                            else:
+                                # Same speaker, continue text
+                                # We append to the last item
+                                final_transcript[-1] = final_transcript[-1][:-1] + f" {text}\""
+
+                        transcript = "\n".join(final_transcript).strip()
                     else:
                         print("Diarization failed or no speakers found, falling back to simple transcript.")
                         transcript = result["text"]
