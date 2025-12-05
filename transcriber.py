@@ -188,7 +188,11 @@ def transcribe_audio(audio_path, model_name="base", language="fi"):
         # verbose=True prints segments to stdout as they are generated
         result = model.transcribe(audio_path, language=language, verbose=True)
         
-        return result["text"]
+        # Combine segments with newlines to avoid "wall of text"
+        segments = result.get('segments', [])
+        formatted_text = "\n".join([seg['text'].strip() for seg in segments])
+        
+        return formatted_text
     except Exception as e:
         print(f"Error during transcription: {e}", file=sys.stderr)
         return None
