@@ -76,4 +76,4 @@ python transcriber.py --diarize --model large
 
 ## Credits
 
-This project was co-created by **Svante Suominen** and **Antigravity** (Google DeepMind).
+This project was co-created by **Svante** and **Antigravity** (Google DeepMind).
