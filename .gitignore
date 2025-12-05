@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+venv/
+*.pyc
+.DS_Store
+
+# Data Directories
+input/
+output/
+processed/
+
+# Media Files (Safety net)
+*.mp4
+*.mkv
+*.mov
+*.avi
+*.webm
+*.mp3
+*.wav
+*.m4a
+*.flac
+*.aac
+*.ogg
+
+# Transcripts (if outside output folder)
+*.txt
