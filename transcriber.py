@@ -158,20 +158,40 @@ def diarize_audio(audio_path, hf_token):
         print(f"Error during diarization: {e}", file=sys.stderr)
         return None
 
-def get_audio_channels(video_path):
+def get_audio_duration(video_path):
     """
-    Returns the number of audio channels in the media file.
+    Returns the duration of the media file in seconds.
     Returns 0 if detection fails.
     """
     try:
         probe = ffmpeg.probe(video_path)
-        audio_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'audio'), None)
-        if audio_stream:
-            return int(audio_stream.get('channels', 0))
-        return 0
+        format_info = probe.get('format', {})
+        return float(format_info.get('duration', 0))
     except Exception as e:
-        print(f"Warning: Could not detect audio channels for {video_path}: {e}")
+        print(f"Warning: Could not detect duration for {video_path}: {e}")
         return 0
+
+def format_duration(seconds):
+    """Formats seconds into MM:SS."""
+    m, s = divmod(int(seconds), 60)
+    return f"{m}m {s}s"
+
+def transcribe_audio(audio_path, model_name="base", language="fi"):
+    """
+    Transcribes the audio file using OpenAI Whisper.
+    """
+    try:
+        print(f"Loading Whisper model '{model_name}'...")
+        model = whisper.load_model(model_name)
+        
+        print(f"Transcribing (Language: {language})... Text will appear below as it's processed:")
+        # verbose=True prints segments to stdout as they are generated
+        result = model.transcribe(audio_path, language=language, verbose=True)
+        
+        return result["text"]
+    except Exception as e:
+        print(f"Error during transcription: {e}", file=sys.stderr)
+        return None
 
 def main():
     parser = argparse.ArgumentParser(description="Transcribe Finnish Google Meet recordings.")
@@ -211,7 +231,21 @@ def main():
         print(f"Found {len(files_to_process)} media file(s) to process.")
 
     for media_file_path in files_to_process:
-        print(f"\nProcessing: {media_file_path}")
+        print(f"\n{'='*50}")
+        print(f"Processing: {os.path.basename(media_file_path)}")
+        print(f"{'='*50}")
+
+        # Duration & Estimation
+        duration = get_audio_duration(media_file_path)
+        if duration > 0:
+            print(f"Audio Duration: {format_duration(duration)}")
+            # Rough estimation: 
+            # Tiny/Base ~ 10-20% of duration on CPU
+            # Large ~ 50-100% of duration on CPU
+            # GPU is much faster.
+            print("Estimated time: This depends heavily on your hardware.")
+            print(" - Fast CPU/GPU: ~10-20% of audio length")
+            print(" - Slower CPU:   ~50-100% of audio length")
         
         transcript = ""
         cleanup_files = []
@@ -234,10 +268,10 @@ def main():
             if left_path and right_path:
                 cleanup_files.extend([left_path, right_path])
                 
-                print("Transcribing Left Channel...")
+                print("\n--- Transcribing LEFT Channel ---")
                 left_text = transcribe_audio(left_path, model_name=args.model, language="fi")
                 
-                print("Transcribing Right Channel...")
+                print("\n--- Transcribing RIGHT Channel ---")
                 right_text = transcribe_audio(right_path, model_name=args.model, language="fi")
                 
                 if left_text or right_text:
@@ -265,14 +299,15 @@ def main():
                     #    but standard transcribe returns a big string. We need verbose output.)
                     print(f"Loading Whisper model '{args.model}'...")
                     model = whisper.load_model(args.model)
-                    print(f"Transcribing (Language: fi)...")
+                    print(f"Transcribing (Language: fi)... Text will appear below:")
                     # We need the result object to match timestamps
-                    result = model.transcribe(temp_audio_path, language="fi")
+                    result = model.transcribe(temp_audio_path, language="fi", verbose=True)
                     
                     # 2. Diarize
                     speakers = diarize_audio(temp_audio_path, hf_token)
                     
                     if speakers and result:
+                        print("Aligning speakers with transcript...")
                         # Simple alignment strategy:
                         # Iterate through whisper segments, find which speaker was active during that time.
                         # This is naive but often sufficient.
@@ -329,7 +364,7 @@ def main():
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write(transcript)
                 
-            print(f"Transcription complete! Saved to: {output_path}")
+            print(f"\nTranscription complete! Saved to: {output_path}")
             
             # Move media file to processed folder ONLY if it was picked up from the input folder
             if os.path.dirname(os.path.abspath(media_file_path)) == os.path.abspath(INPUT_DIR):
