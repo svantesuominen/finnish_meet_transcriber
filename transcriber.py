@@ -176,9 +176,11 @@ def format_duration(seconds):
     m, s = divmod(int(seconds), 60)
     return f"{m}m {s}s"
 
-def transcribe_audio(audio_path, model_name="base", language="fi"):
+def transcribe_audio(audio_path, model_name="base", language="fi", return_segments=False):
     """
     Transcribes the audio file using OpenAI Whisper.
+    If return_segments is True, returns the list of segment dicts.
+    Otherwise returns formatted text string.
     """
     try:
         print(f"Loading Whisper model '{model_name}'...")
@@ -188,6 +190,9 @@ def transcribe_audio(audio_path, model_name="base", language="fi"):
         # verbose=True prints segments to stdout as they are generated
         result = model.transcribe(audio_path, language=language, verbose=True)
         
+        if return_segments:
+            return result.get('segments', [])
+
         # Combine segments with newlines to avoid "wall of text"
         segments = result.get('segments', [])
         formatted_text = "\n".join([seg['text'].strip() for seg in segments])
@@ -275,13 +280,46 @@ def main():
                 cleanup_files.extend([left_path, right_path])
                 
                 print("\n--- Transcribing LEFT Channel ---")
-                left_text = transcribe_audio(left_path, model_name=args.model, language="fi")
+                left_segments = transcribe_audio(left_path, model_name=args.model, language="fi", return_segments=True)
                 
                 print("\n--- Transcribing RIGHT Channel ---")
-                right_text = transcribe_audio(right_path, model_name=args.model, language="fi")
+                right_segments = transcribe_audio(right_path, model_name=args.model, language="fi", return_segments=True)
                 
-                if left_text or right_text:
-                    transcript = f"--- [LEFT CHANNEL] ---\n{left_text}\n\n--- [RIGHT CHANNEL] ---\n{right_text}"
+                if left_segments is not None and right_segments is not None:
+                    # Label segments
+                    # Left = Person 1, Right = Person 2
+                    all_segments = []
+                    for seg in left_segments:
+                        seg['speaker'] = "Person 1 (Left)"
+                        all_segments.append(seg)
+                    for seg in right_segments:
+                        seg['speaker'] = "Person 2 (Right)"
+                        all_segments.append(seg)
+                    
+                    # Sort by start time
+                    all_segments.sort(key=lambda x: x['start'])
+                    
+                    # Merge into dialogue
+                    final_transcript = []
+                    current_speaker = None
+                    
+                    for seg in all_segments:
+                        text = seg['text'].strip()
+                        speaker = seg['speaker']
+                        
+                        if not text:
+                            continue
+                            
+                        # Validates if we should start a new line or append to previous
+                        if speaker != current_speaker:
+                            # New speaker block
+                            final_transcript.append(f"\n{speaker}: \"{text}\"")
+                            current_speaker = speaker
+                        else:
+                            # Same speaker, continue text
+                            final_transcript[-1] = final_transcript[-1][:-1] + f" {text}\""
+                            
+                    transcript = "\n".join(final_transcript).strip()
             else:
                  print(f"Skipping {media_file_path} due to stereo extraction failure.")
                  continue
