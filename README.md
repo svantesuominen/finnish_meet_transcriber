@@ -61,9 +61,9 @@ The default is `base` (fast but less accurate).
 ```bash
 python transcriber.py --model medium
 ```
-or for the absolute best results (runs slower):
+or for the absolute best results (speaker separation + high accuracy):
 ```bash
-python transcriber.py --model large
+python transcriber.py --diarize --model large
 ```
 
 ## Output Format
