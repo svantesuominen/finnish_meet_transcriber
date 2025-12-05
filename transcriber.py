@@ -158,6 +158,21 @@ def diarize_audio(audio_path, hf_token):
         print(f"Error during diarization: {e}", file=sys.stderr)
         return None
 
+def get_audio_channels(video_path):
+    """
+    Returns the number of audio channels in the media file.
+    Returns 0 if detection fails.
+    """
+    try:
+        probe = ffmpeg.probe(video_path)
+        audio_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'audio'), None)
+        if audio_stream:
+            return int(audio_stream.get('channels', 0))
+        return 0
+    except Exception as e:
+        print(f"Warning: Could not detect audio channels for {video_path}: {e}")
+        return 0
+
 def main():
     parser = argparse.ArgumentParser(description="Transcribe Finnish Google Meet recordings.")
     parser.add_argument("input_file", nargs='?', help="Path to a specific video file. If not provided, scans the 'input' directory.")
@@ -201,7 +216,19 @@ def main():
         transcript = ""
         cleanup_files = []
 
-        if args.stereo:
+        # Determine processing mode
+        process_stereo = args.stereo
+        
+        # Auto-detect channels if stereo is requested
+        if process_stereo:
+            channels = get_audio_channels(media_file_path)
+            if channels > 0 and channels < 2:
+                print(f"Info: File '{os.path.basename(media_file_path)}' is detected as Mono ({channels} ch). Falling back to standard transcription.")
+                process_stereo = False
+            elif channels >= 2:
+                print(f"Info: File '{os.path.basename(media_file_path)}' detected as Stereo/Multi-channel ({channels} ch). Processing splitting...")
+
+        if process_stereo:
             # Stereo processing
             left_path, right_path = extract_stereo_channels(media_file_path)
             if left_path and right_path:
