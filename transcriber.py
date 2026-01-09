@@ -171,6 +171,20 @@ def get_audio_duration(video_path):
         print(f"Warning: Could not detect duration for {video_path}: {e}")
         return 0
 
+def get_audio_channels(video_path):
+    """
+    Returns the number of audio channels in the media file.
+    """
+    try:
+        probe = ffmpeg.probe(video_path)
+        audio_streams = [s for s in probe['streams'] if s['codec_type'] == 'audio']
+        if not audio_streams:
+            return 0
+        return int(audio_streams[0].get('channels', 0))
+    except Exception as e:
+        print(f"Warning: Could not detect channels for {video_path}: {e}")
+        return 0
+
 def format_duration(seconds):
     """Formats seconds into MM:SS."""
     m, s = divmod(int(seconds), 60)
@@ -205,7 +219,7 @@ def transcribe_audio(audio_path, model_name="base", language="fi", return_segmen
 def main():
     parser = argparse.ArgumentParser(description="Transcribe Finnish Google Meet recordings.")
     parser.add_argument("input_file", nargs='?', help="Path to a specific video file. If not provided, scans the 'input' directory.")
-    parser.add_argument("--model", default="base", choices=["tiny", "base", "small", "medium", "large"], help="Whisper model size")
+    parser.add_argument("--model", default="large", choices=["tiny", "base", "small", "medium", "large", "large-v1", "large-v2", "large-v3"], help="Whisper model size (default: large)")
     parser.add_argument("--output_dir", default=OUTPUT_DIR, help=f"Directory to save the text file (default: {OUTPUT_DIR})")
     parser.add_argument("--stereo", action="store_true", help="Process Left and Right channels separately (useful for split-channel recordings)")
     parser.add_argument("--diarize", action="store_true", help="Enable speaker diarization (Requires pyannote.audio and HF_TOKEN env var)")
@@ -250,9 +264,13 @@ def main():
             print(f"Audio Duration: {format_duration(duration)}")
             print("\n[TIP] Performance vs Quality:")
             print(" - Current Model: " + args.model)
+            if args.model.startswith("large"):
+                print(" - Using the largest model for maximum accuracy. This is slower than smaller models.")
+            print(" - Use '--stereo' for phone calls with 2 separate channels (Person 1 / Person 2).")
+            print(" - Use '--diarize' for meetings with 3+ people (requires HF_TOKEN).")
+            
             if args.model in ['tiny', 'base', 'small']:
-                print(" - For better accuracy (especially with elderly/muffled speech), use: --model medium")
-            print(" - Large models take longer but produce the best results.")
+                print(" - For better accuracy, use: --model medium or large")
             
             print("\nEstimated time: This depends heavily on your hardware.")
             print(" - Fast CPU/GPU: ~10-20% of audio length")
@@ -272,6 +290,10 @@ def main():
                 process_stereo = False
             elif channels >= 2:
                 print(f"Info: File '{os.path.basename(media_file_path)}' detected as Stereo/Multi-channel ({channels} ch). Processing splitting...")
+        else:
+            channels = get_audio_channels(media_file_path)
+            if channels >= 2:
+                print(f"Info: File '{os.path.basename(media_file_path)}' has {channels} channels. If this is a phone call recording, consider using '--stereo' for separate speaker labeling.")
 
         if process_stereo:
             # Stereo processing
@@ -290,10 +312,10 @@ def main():
                     # Left = Person 1, Right = Person 2
                     all_segments = []
                     for seg in left_segments:
-                        seg['speaker'] = "Person 1 (Left)"
+                        seg['speaker'] = "Person 1"
                         all_segments.append(seg)
                     for seg in right_segments:
-                        seg['speaker'] = "Person 2 (Right)"
+                        seg['speaker'] = "Person 2"
                         all_segments.append(seg)
                     
                     # Sort by start time
@@ -313,11 +335,11 @@ def main():
                         # Validates if we should start a new line or append to previous
                         if speaker != current_speaker:
                             # New speaker block
-                            final_transcript.append(f"\n{speaker}: \"{text}\"")
+                            final_transcript.append(f"\n{speaker}: {text}")
                             current_speaker = speaker
                         else:
                             # Same speaker, continue text
-                            final_transcript[-1] = final_transcript[-1][:-1] + f" {text}\""
+                            final_transcript[-1] = final_transcript[-1] + f" {text}"
                             
                     transcript = "\n".join(final_transcript).strip()
             else:
@@ -386,12 +408,11 @@ def main():
                             # Validates if we should start a new line or append to previous
                             if friendly_name != current_speaker:
                                 # New speaker block
-                                final_transcript.append(f"\n{friendly_name}: \"{text}\"")
+                                final_transcript.append(f"\n{friendly_name}: {text}")
                                 current_speaker = friendly_name
                             else:
                                 # Same speaker, continue text
-                                # We append to the last item
-                                final_transcript[-1] = final_transcript[-1][:-1] + f" {text}\""
+                                final_transcript[-1] = final_transcript[-1] + f" {text}"
 
                         transcript = "\n".join(final_transcript).strip()
                     else:
