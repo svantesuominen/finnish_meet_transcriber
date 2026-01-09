@@ -54,25 +54,25 @@ A Python tool for automatically transcribing Finnish Google Meet recordings (and
    - Move the original media file to `processed/`.
 
 ## Improving Accuracy (Important!)
-If the results contain nonsense words or poor transcription, **use a larger model**.
-The default is `base` (fast but less accurate).
 
-**Recommended Command for Quality:**
+The script defaults to the **`large`** model for the best possible accuracy. If you need it to run faster on a machine with limited hardware, you can use smaller models.
+
+**Model Sizes (from smallest/fastest to largest/most accurate):**
+`tiny`, `base`, `small`, `medium`, `large` (default), `large-v3`
+
+**Example Command for Speed:**
 ```bash
-python transcriber.py --model medium
-```
-or for the absolute best results (speaker separation + high accuracy):
-```bash
-python transcriber.py --diarize --model large
+python transcriber.py --model base
 ```
 
 ## Output Format
-- **Standard**: Continuous text block.
-- **Diarization (`--diarize`)**: Readable dialogue format:
-  ```text
-  Person 1: "Hello."
-  Person 2: "Hi there."
-  ```
+
+The script provides structured dialogue formatting when using `--stereo` or `--diarize`:
+
+```text
+Person 1: Hei, miten menee?
+Person 2: Hyvää kuuluu, entä sinulle?
+```
 
 ## Credits
 
